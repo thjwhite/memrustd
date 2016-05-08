@@ -1,0 +1,6 @@
+[package]
+name = "memrustd"
+version = "0.1.0"
+authors = ["TJ White <thjwhite@gmail.com>"]
+
+[dependencies]
