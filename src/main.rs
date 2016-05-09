@@ -20,7 +20,7 @@ struct Connection {
 }
 
 impl Connection {
-    
+
     fn new(socket: mio::tcp::TcpStream, token: mio::Token) -> Connection {
         Connection {
             socket: socket,
@@ -39,6 +39,7 @@ impl Connection {
             }
             Ok(Some(num_bytes)) => {
                 self.out_buf.write_all(self.in_buf.get_ref());
+                self.in_buf = std::io::Cursor::new(Vec::new());
 
                 self.interest.remove(mio::EventSet::readable());
                 self.interest.insert(mio::EventSet::writable());
@@ -57,12 +58,16 @@ impl Connection {
 
     fn handle_writable(&mut self,
                        event_loop: &mut mio::EventLoop<Server>) -> std::io::Result<()> {
+        self.out_buf.set_position(0);
         match self.socket.try_write_buf(&mut self.out_buf) {
             Ok(None) => {
+                println!("did not write, but not failed");
                 self.interest.insert(mio::EventSet::writable());
             }
             Ok(Some(num_bytes)) => {
                 // todo may need to change this behavior later
+                println!("wrote {}", num_bytes);
+                self.out_buf = std::io::Cursor::new(Vec::new());
                 self.interest.remove(mio::EventSet::writable());
                 self.interest.insert(mio::EventSet::readable());
             }
@@ -103,9 +108,9 @@ impl mio::Handler for Server {
 
     fn ready(&mut self,
              event_loop: &mut mio::EventLoop<Server>,
-             token: mio::Token,
+             event_token: mio::Token,
              events: mio::EventSet) {
-        match token {
+        match event_token {
             SERVER =>  {
                 if !events.is_readable() {
                     println!("server event, not readable");
@@ -115,19 +120,19 @@ impl mio::Handler for Server {
                     Ok(Some((socket, _))) => {
                         // ignore the SocketAddr for now (the _)
                         // all we care about is the TcpListener
-                        match self.connections.insert_with(|token| 
-                                                           Connection::new(socket, token)) {
-                            Some(_) => {
+                        match self.connections.insert_with(|new_token|
+                                                           Connection::new(socket, new_token)) {
+                            Some(new_token) => {
                                 // successfully inserted into our connection slab
-                                match event_loop.register(&self.connections[token].socket,
-                                                          token,
+                                match event_loop.register(&self.connections[new_token].socket,
+                                                          new_token,
                                                           mio::EventSet::readable(),
                                                           mio::PollOpt::edge() |
                                                           mio::PollOpt::oneshot()) {
                                     Ok(_) => {}, // success
                                     Err(e) => {
                                         println!("Failed to register Connection");
-                                        self.connections.remove(token);
+                                        self.connections.remove(new_token);
                                     }
                                 }
                             }
@@ -148,11 +153,13 @@ impl mio::Handler for Server {
             _ => {
                 // assume all other tokens are existing client connections.
                 if events.is_readable() {
-                    self.connections[token].handle_readable(event_loop);
+                    println!("READ EVENT");
+                    self.connections[event_token].handle_readable(event_loop);
                 }
 
-                if events.is_writable() {                
-                    self.connections[token].handle_writable(event_loop);
+                if events.is_writable() {
+                    println!("WRITE EVENT");
+                    self.connections[event_token].handle_writable(event_loop);
                 }
             }
         }
@@ -164,7 +171,7 @@ fn main() {
     let server = mio::tcp::TcpListener::bind(&address).unwrap();
 
     let mut event_loop = mio::EventLoop::new().unwrap();
-    event_loop.register(&server, SERVER, mio::EventSet::readable(), mio::PollOpt::level());
+    event_loop.register(&server, SERVER, mio::EventSet::readable(), mio::PollOpt::edge());
 
     println!("running pingpong server");
     event_loop.run(&mut Server::new(server));
