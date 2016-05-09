@@ -1,6 +1,10 @@
 extern crate mio;
 extern crate slab;
 
+use mio::TryRead;
+use mio::TryWrite;
+use std::io::Write;
+
 const SERVER: mio::Token = mio::Token(0);
 
 struct Connection {
@@ -17,20 +21,21 @@ struct Connection {
 
 impl Connection {
     
-    fn new(socket: TcpStream, token: Token) -> Connection {
+    fn new(socket: mio::tcp::TcpStream, token: mio::Token) -> Connection {
         Connection {
             socket: socket,
             token: token,
             interest: mio::EventSet::hup(),
-            out_buf: Cursor::new(Vec::new()),
-            in_buf: Cursor::new(Vec::new())
+            out_buf: std::io::Cursor::new(Vec::new()),
+            in_buf: std::io::Cursor::new(Vec::new())
         }
     }
 
-    fn handle_readable(&mut self, event_loop: &mut EventLoop<Server>) -> std::io::Result<()> {
-        match self.socket.try_read_buf(&mut self.in_buf) {
+    fn handle_readable(&mut self,
+                       event_loop: &mut mio::EventLoop<Server>) -> std::io::Result<()> {
+        match self.socket.try_read_buf(self.in_buf.get_mut()) {
             Ok(None) => {
-                self.interest.inset(mio::EventSet::readable());
+                self.interest.insert(mio::EventSet::readable());
             }
             Ok(Some(num_bytes)) => {
                 self.out_buf.write_all(self.in_buf.get_ref());
@@ -50,15 +55,16 @@ impl Connection {
                               mio::PollOpt::edge() | mio::PollOpt::oneshot())
     }
 
-    fn handle_writable(&mut self, event_loop: &mut EventLoop<Server>) -> std::io::Result<()> {
+    fn handle_writable(&mut self,
+                       event_loop: &mut mio::EventLoop<Server>) -> std::io::Result<()> {
         match self.socket.try_write_buf(&mut self.out_buf) {
             Ok(None) => {
-                self.interest.insert(mio::EventSEt::writable());
+                self.interest.insert(mio::EventSet::writable());
             }
             Ok(Some(num_bytes)) => {
                 // todo may need to change this behavior later
-                self.interest.remove(EventSet::writable());
-                self.interest.insert(EventSet::readable());
+                self.interest.remove(mio::EventSet::writable());
+                self.interest.insert(mio::EventSet::readable());
             }
             Err(e) => {
                 println!("Error writing");
@@ -75,15 +81,15 @@ impl Connection {
 
 struct Server {
     server: mio::tcp::TcpListener,
-    connections: slab::Slab<mio::Connection, mio::Token>
+    connections: slab::Slab<Connection, mio::Token>
 }
 
 impl Server {
 
-    fn new(server: mio::tcp::TcpListener) -> Pong {
+    fn new(server: mio::tcp::TcpListener) -> Server {
         let slab = mio::util::Slab::new_starting_at(mio::Token(1), 1024);
 
-        Pong {
+        Server {
             server: server,
             connections: slab
         }
@@ -96,7 +102,7 @@ impl mio::Handler for Server {
     type Message = ();
 
     fn ready(&mut self,
-             event_loop: &mut mio::EventLoop<Pong>,
+             event_loop: &mut mio::EventLoop<Server>,
              token: mio::Token,
              events: mio::EventSet) {
         match token {
@@ -148,10 +154,6 @@ impl mio::Handler for Server {
                 if events.is_writable() {                
                     self.connections[token].handle_writable(event_loop);
                 }
-                
-                if self.connections[token].is_closed() {
-                    self.connections.remove(token);
-                }
             }
         }
     }
@@ -165,5 +167,5 @@ fn main() {
     event_loop.register(&server, SERVER, mio::EventSet::readable(), mio::PollOpt::level());
 
     println!("running pingpong server");
-    event_loop.run(&mut Server { server: server });
+    event_loop.run(&mut Server::new(server));
 }
