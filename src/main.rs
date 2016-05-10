@@ -12,6 +12,9 @@ struct Connection {
     token: mio::Token,
     interest: mio::EventSet,
 
+    // whether to completely deregister the connection on the tick()
+    kill_on_tick: bool, 
+
     // output buffer
     out_buf: std::io::Cursor<Vec<u8>>,
 
@@ -25,61 +28,70 @@ impl Connection {
         Connection {
             socket: socket,
             token: token,
-            interest: mio::EventSet::hup(),
+            interest: mio::EventSet::all(),
+            kill_on_tick: false,
             out_buf: std::io::Cursor::new(Vec::new()),
             in_buf: std::io::Cursor::new(Vec::new())
         }
     }
 
+    fn kill_on_tick(&mut self) {
+        self.kill_on_tick = true;
+    }
+
     fn handle_readable(&mut self,
                        event_loop: &mut mio::EventLoop<Server>) -> std::io::Result<()> {
-        match self.socket.try_read_buf(self.in_buf.get_mut()) {
-            Ok(None) => {
-                self.interest.insert(mio::EventSet::readable());
-            }
-            Ok(Some(num_bytes)) => {
-                self.out_buf.write_all(self.in_buf.get_ref());
-                self.in_buf = std::io::Cursor::new(Vec::new());
-
-                self.interest.remove(mio::EventSet::readable());
-                self.interest.insert(mio::EventSet::writable());
-            }
-            Err(e) => {
-                println!("Error reading");
-                self.interest.remove(mio::EventSet::readable());
+        loop {
+            match self.socket.try_read_buf(self.in_buf.get_mut()) {
+                Ok(None) => {
+                    // WouldBlock condition. If there was anything to read
+                    // we have read it. Move on.
+                    println!("WouldBlock on READ");
+                    return Ok(());
+                }
+                Ok(Some(num_bytes)) => {
+                    // We successfully read num_bytes amount of bytes.
+                    // don't return, continue to next iteration to keep reading.
+                    // might be queued.
+                    println!("READ {} bytes", num_bytes);
+                    self.out_buf.write_all(self.in_buf.get_ref());
+                    self.in_buf = std::io::Cursor::new(Vec::new());
+                    continue;
+                }
+                Err(e) => {
+                    println!("Error reading");
+                    return Err(e);
+                }
             }
         }
-
-        event_loop.reregister(&self.socket,
-                              self.token,
-                              self.interest,
-                              mio::PollOpt::edge() | mio::PollOpt::oneshot())
     }
 
     fn handle_writable(&mut self,
                        event_loop: &mut mio::EventLoop<Server>) -> std::io::Result<()> {
-        self.out_buf.set_position(0);
-        match self.socket.try_write_buf(&mut self.out_buf) {
-            Ok(None) => {
-                println!("did not write, but not failed");
-                self.interest.insert(mio::EventSet::writable());
-            }
-            Ok(Some(num_bytes)) => {
-                // todo may need to change this behavior later
-                println!("wrote {}", num_bytes);
-                self.out_buf = std::io::Cursor::new(Vec::new());
-                self.interest.remove(mio::EventSet::writable());
-                self.interest.insert(mio::EventSet::readable());
-            }
-            Err(e) => {
-                println!("Error writing");
+        let buf_size = self.out_buf.get_ref().len();
+        if buf_size > 0 {
+            self.out_buf.set_position(0);
+            while self.out_buf.position() < buf_size as u64 - 1 {
+                match self.socket.try_write_buf(&mut self.out_buf) {
+                    Ok(None) => {
+                        println!("WouldBlock on WRITE");
+                        self.out_buf = std::io::Cursor::new(Vec::new());
+                        return Ok(());
+                    }
+                    Ok(Some(num_bytes)) => {
+                        // todo may need to change this behavior later
+                        println!("WROTE {}", num_bytes);
+                        continue;
+                    }
+                    Err(e) => {
+                        println!("Error writing");
+                        return Err(e);
+                    }
+                }
             }
         }
-
-        event_loop.reregister(&self.socket,
-                              self.token,
-                              self.interest,
-                              mio::PollOpt::edge() | mio::PollOpt::oneshot())
+        self.out_buf = std::io::Cursor::new(Vec::new());
+        Ok(())
     }
 
 }
@@ -126,9 +138,8 @@ impl mio::Handler for Server {
                                 // successfully inserted into our connection slab
                                 match event_loop.register(&self.connections[new_token].socket,
                                                           new_token,
-                                                          mio::EventSet::readable(),
-                                                          mio::PollOpt::edge() |
-                                                          mio::PollOpt::oneshot()) {
+                                                          mio::EventSet::all(),
+                                                          mio::PollOpt::edge()) {
                                     Ok(_) => {}, // success
                                     Err(e) => {
                                         println!("Failed to register Connection");
