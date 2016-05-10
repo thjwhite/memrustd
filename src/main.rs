@@ -1,9 +1,13 @@
 extern crate mio;
 extern crate slab;
+extern crate nix;
 
 use mio::TryRead;
 use mio::TryWrite;
 use std::io::Write;
+use std::os::unix::io::AsRawFd;
+use nix::sys::socket::setsockopt;
+use nix::sys::socket::sockopt::ReusePort;
 
 const SERVER: mio::Token = mio::Token(0);
 
@@ -99,7 +103,6 @@ impl Server {
             connections: slab
         }
     }
-
 }
 
 impl mio::Handler for Server {
@@ -169,6 +172,7 @@ impl mio::Handler for Server {
 fn main() {
     let address = "0.0.0.0:6567".parse().unwrap();
     let server = mio::tcp::TcpListener::bind(&address).unwrap();
+    setsockopt(server.as_raw_fd(), ReusePort, &true);
 
     let mut event_loop = mio::EventLoop::new().unwrap();
     event_loop.register(&server, SERVER, mio::EventSet::readable(), mio::PollOpt::edge());

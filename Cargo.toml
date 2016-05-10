@@ -7,3 +7,4 @@ authors = ["TJ White <thjwhite@gmail.com>"]
 mio="0.5"
 slab="0.1.0"
 bytes="0.3.0"
+nix = { git = "https://github.com/carllerche/nix-rust", rev = "c4257f8a76" }
