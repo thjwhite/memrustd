@@ -31,7 +31,7 @@ impl Connection {
             interest: mio::EventSet::all(),
             kill_on_tick: false,
             out_buf: std::io::Cursor::new(Vec::new()),
-            in_buf: std::io::Cursor::new(Vec::new())
+            in_buf: std::io::Cursor::new(Vec::with_capacity(1024))
         }
     }
 
@@ -118,6 +118,47 @@ impl mio::Handler for Server {
     type Timeout = ();
     type Message = ();
 
+    fn handle_accept(mio::tcp::TcpStream socket) {
+        // ignore the SocketAddr for now (the _)
+        // all we care about is the TcpListener
+        match self.connections.insert_with(|new_token|
+                                           Connection::new(socket, new_token)) {
+            Some(new_token) => {
+                // successfully inserted into our connection slab
+                match event_loop.register(&self.connections[new_token].socket,
+                                          new_token,
+                                          mio::EventSet::all(),
+                                          mio::PollOpt::edge()) {
+                    Ok(_) => {}, // success
+                    Err(e) => {
+                        println!("Failed to register Connection");
+                        self.connections.remove(new_token);
+                    }
+                }
+            }
+            None => {
+                println!("Failed to insert connection into slab");
+            }
+        }
+    }
+
+    fn loop_accept() {
+        loop {
+            match self.server.accept() {
+                Ok(Some((socket, _))) => {
+                    self.handle_accept(socket);
+                }
+                Ok(None) => {
+                    println!("No more pending connection requests to accept");
+                }
+                Err(e) => {
+                    println!("listener.accept() errored: {}", e);
+                    event_loop.shutdown();
+                }
+            }
+        }
+    }
+
     fn ready(&mut self,
              event_loop: &mut mio::EventLoop<Server>,
              event_token: mio::Token,
@@ -125,44 +166,13 @@ impl mio::Handler for Server {
         match event_token {
             SERVER =>  {
                 if !events.is_readable() {
-                    println!("server event, not readable");
+                    println!("server token event, not readable.");
                 }
                 println!("the server socket is ready to accept a connection");
-                match self.server.accept() {
-                    Ok(Some((socket, _))) => {
-                        // ignore the SocketAddr for now (the _)
-                        // all we care about is the TcpListener
-                        match self.connections.insert_with(|new_token|
-                                                           Connection::new(socket, new_token)) {
-                            Some(new_token) => {
-                                // successfully inserted into our connection slab
-                                match event_loop.register(&self.connections[new_token].socket,
-                                                          new_token,
-                                                          mio::EventSet::all(),
-                                                          mio::PollOpt::edge()) {
-                                    Ok(_) => {}, // success
-                                    Err(e) => {
-                                        println!("Failed to register Connection");
-                                        self.connections.remove(new_token);
-                                    }
-                                }
-                            }
-                            None => {
-                                println!("Failed to insert connection into slab");
-                            }
-                        }
-                    }
-                    Ok(None) => {
-                        println!("the server socket wasn't actually ready");
-                    }
-                    Err(e) => {
-                        println!("listener.accept() errored: {}", e);
-                        event_loop.shutdown();
-                    }
-                }
+                self.loop_accept();
             }
             _ => {
-                // assume all other tokens are existing client connections.
+                // assume all other tokens are existing client connections.                
                 if events.is_readable() {
                     println!("READ EVENT");
                     self.connections[event_token].handle_readable(event_loop);
