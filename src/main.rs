@@ -35,10 +35,10 @@ impl Connection {
         }
     }
 
-    fn kill_on_tick(&mut self) {
+    fn set_kill_on_tick(&mut self) {
         self.kill_on_tick = true;
     }
-
+    
     fn handle_readable(&mut self,
                        event_loop: &mut mio::EventLoop<Server>) -> std::io::Result<()> {
         loop {
@@ -174,6 +174,27 @@ impl mio::Handler for Server {
     type Timeout = ();
     type Message = ();
 
+    fn tick(&mut self, event_loop: &mut mio::EventLoop<Server>) {
+        let mut kill_tokens = Vec::new();
+        for conn in self.connections.iter_mut() {
+            if conn.kill_on_tick {
+                kill_tokens.push(conn.token);
+            }
+        }
+
+        for token in kill_tokens {
+            match self.connections.remove(token) {
+                Some(conn) => {
+                    println!("kill connection {}", token.as_usize());
+                    event_loop.deregister(&conn.socket);
+                }
+                None => {
+                    println!("unable to kill connection {}", token.as_usize());
+                }
+            }
+        }
+    }
+
     fn ready(&mut self,
              event_loop: &mut mio::EventLoop<Server>,
              event_token: mio::Token,
@@ -192,6 +213,18 @@ impl mio::Handler for Server {
                 }
             }
             _ => {
+                if events.is_error() {
+                    println!("Error event");
+                    self.connections[event_token].set_kill_on_tick();
+                    return;
+                }
+
+                if events.is_hup() {
+                    println!("HUP event");
+                    self.connections[event_token].set_kill_on_tick();
+                    return;
+                }
+
                 // assume all other tokens are existing client connections.                
                 if events.is_readable() {
                     println!("READ EVENT");
