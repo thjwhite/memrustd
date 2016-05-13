@@ -112,13 +112,9 @@ impl Server {
         }
     }
 
-}
-
-impl mio::Handler for Server {
-    type Timeout = ();
-    type Message = ();
-
-    fn handle_accept(mio::tcp::TcpStream socket) {
+    fn handle_accept(&mut self,
+                     socket: mio::tcp::TcpStream,
+                     event_loop: &mut mio::EventLoop<Server>) -> std::io::Result<()> {
         // ignore the SocketAddr for now (the _)
         // all we care about is the TcpListener
         match self.connections.insert_with(|new_token|
@@ -129,35 +125,54 @@ impl mio::Handler for Server {
                                           new_token,
                                           mio::EventSet::all(),
                                           mio::PollOpt::edge()) {
-                    Ok(_) => {}, // success
+                    Ok(_) => {
+                        //success
+                        Ok(())
+                    },
                     Err(e) => {
-                        println!("Failed to register Connection");
+                        println!("Failed to register connection in the event loop");
                         self.connections.remove(new_token);
+                        Err(e)
                     }
                 }
             }
             None => {
                 println!("Failed to insert connection into slab");
+                Err(std::io::Error::new(std::io::ErrorKind::Other,
+                                        "failed to insert connection into slab"))
             }
         }
     }
 
-    fn loop_accept() {
+    fn loop_accept(&mut self,
+                   event_loop: &mut mio::EventLoop<Server>) -> std::io::Result<()> {
         loop {
             match self.server.accept() {
                 Ok(Some((socket, _))) => {
-                    self.handle_accept(socket);
+                    match self.handle_accept(socket, event_loop) {
+                        Ok(_) => {}
+                        Err(e) => {
+                            return Err(e);
+                        }
+                    }
                 }
                 Ok(None) => {
                     println!("No more pending connection requests to accept");
+                    return Ok(());
                 }
                 Err(e) => {
                     println!("listener.accept() errored: {}", e);
-                    event_loop.shutdown();
+                    return Err(e);
                 }
             }
         }
     }
+
+}
+
+impl mio::Handler for Server {
+    type Timeout = ();
+    type Message = ();
 
     fn ready(&mut self,
              event_loop: &mut mio::EventLoop<Server>,
@@ -169,7 +184,12 @@ impl mio::Handler for Server {
                     println!("server token event, not readable.");
                 }
                 println!("the server socket is ready to accept a connection");
-                self.loop_accept();
+                match self.loop_accept(event_loop) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        println!("Failure in loop_accept: {}", e);
+                    }
+                }
             }
             _ => {
                 // assume all other tokens are existing client connections.                
