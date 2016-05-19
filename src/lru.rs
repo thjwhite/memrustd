@@ -12,21 +12,6 @@ struct LruEntry<T> {
     prev: Option<Weak<RefCell<LruEntry<T>>>>
 }
 
-/*impl<'a, T> LruEntry<'a, T> {
-    
-    fn new(key: &'a str, 
-           data: &'a T, 
-           next: Option<Box<&'a LruEntry<'a, T>>>, 
-           prev: Option<&'a LruEntry<'a, T>>) -> LruEntry<'a, T> {
-        LruEntry {
-            key: key,
-            data: data,
-            next: next,
-            prev: prev
-        }
-    }
-}*/
-
 struct LruCache<T> {
     cache: HashMap<String, Arc<RefCell<LruEntry<T>>>>,
     front: Option<Arc<RefCell<LruEntry<T>>>>,
@@ -85,23 +70,21 @@ impl<T> LruCache<T> {
                     None => {
                         // first element in the list.
                         //self.front = Some((*entry).borrow().next);
+                        let mut new_front = None;
                         match self.front {
                             None => {},
                             Some(ref _front) => {
                                 match (**_front).borrow_mut().next {
-                                    None => {
-                                        // front was only elem in list set front to None
-                                        self.front = None;
-                                    },
+                                    None => {},
                                     Some(ref _second) => {
                                         // the element after the remove one is not the first
-                                        self.front = Some(_second.clone());
+                                        new_front = Some(_second.clone());
                                         (**_second).borrow_mut().prev = None;
                                     }
                                 }
                             }
                         }
-                        Ok(entry)
+                        self.front = new_front;
                     },
                     Some(ref _prev) => {
                         // not the first element.
@@ -132,9 +115,9 @@ impl<T> LruCache<T> {
                                 }
                             }
                         }
-                        Ok(entry)
                     }
                 }
+                Ok(entry)
             }
         }
     }
