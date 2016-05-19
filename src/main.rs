@@ -5,6 +5,8 @@ use mio::TryRead;
 use mio::TryWrite;
 use std::io::Write;
 
+mod lru;
+
 const SERVER: mio::Token = mio::Token(0);
 
 struct Connection {
