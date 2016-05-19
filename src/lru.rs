@@ -30,12 +30,6 @@ impl<T> LruCache<T> {
     }
 
     fn insert(&mut self, key: String, data: T) {
-        /*let mut entry = Arc::new(LruEntry {
-            key: key,
-            data: data, 
-            next: None,
-            prev: None});*/
-        
         let entry: Arc<RefCell<LruEntry<T>>>;
         match self.back {
             None => {
@@ -68,8 +62,6 @@ impl<T> LruCache<T> {
             Some(entry) => {
                 match (*entry).borrow_mut().prev {
                     None => {
-                        // first element in the list.
-                        //self.front = Some((*entry).borrow().next);
                         let mut new_front = None;
                         match self.front {
                             None => {},
@@ -87,16 +79,8 @@ impl<T> LruCache<T> {
                         self.front = new_front;
                     },
                     Some(ref _prev) => {
-                        // not the first element.
-                        //Arc::get_mut(_prev.upgrade()).next = entry.next;
-
-                        /*match _prev.upgrade() {
-                            None => ()
-                        }*/
-
                         match (*entry).borrow_mut().next {
                             None => {
-                                //(*_prev.upgrade()).next = None;
                                 match _prev.upgrade() {
                                     None => {/* broken */},
                                     Some(ref _prev_arc) => {
@@ -106,7 +90,6 @@ impl<T> LruCache<T> {
                             },
                             Some(ref _next) => {
                                 (*_next).borrow_mut().prev = Some(_prev.clone()); 
-                                //(*_prev).next = Some(_next.clone());
                                 match _prev.upgrade() {
                                     None => {/* broken */}
                                     Some(ref _prev_arc) => {
