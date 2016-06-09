@@ -132,47 +132,6 @@ impl<T> LruCache<T> {
             Some(entry) => {
                 self.close_gap(entry.clone());
                 Ok(entry)
-                /*match (*entry).borrow_mut().prev {
-                    None => {
-                        let mut new_front = None;
-                        match self.front {
-                            None => {},
-                            Some(ref _front) => {
-                                match (**_front).borrow_mut().next {
-                                    None => {},
-                                    Some(ref _second) => {
-                                        // the element after the remove one is not the first
-                                        new_front = Some(_second.clone());
-                                        (**_second).borrow_mut().prev = None;
-                                    }
-                                }
-                            }
-                        }
-                        self.front = new_front;
-                    },
-                    Some(ref _prev) => {
-                        match (*entry).borrow_mut().next {
-                            None => {
-                                match _prev.upgrade() {
-                                    None => {/* broken */},
-                                    Some(ref _prev_arc) => {
-                                        (*_prev_arc).borrow_mut().next = None;
-                                    }
-                                }
-                            },
-                            Some(ref _next) => {
-                                (*_next).borrow_mut().prev = Some(_prev.clone()); 
-                                match _prev.upgrade() {
-                                    None => {/* broken */}
-                                    Some(ref _prev_arc) => {
-                                        (*_prev_arc).borrow_mut().next = Some(_next.clone());
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                Ok(entry)*/
             }
         }
     }
