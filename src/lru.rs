@@ -29,6 +29,33 @@ impl<T> LruCache<T> {
         }
     }
 
+    fn get(&mut self, key: String) -> Result<Arc<RefCell<LruEntry<T>>>, Error> {
+        //let entry = self.cache.get(&key);
+        let value: Arc<RefCell<LruEntry<T>>> = match self.cache.get(&key) {
+            None => {
+                return Err(Error::new(ErrorKind::Other, "Not found"));
+            }
+            Some(value) => {
+                value.clone()
+            }
+        };
+        
+        self.close_gap(value.clone());
+        (*value).borrow_mut().prev = None;
+        match self.front {
+            None => {
+                /* How did we get here? */
+            }
+            Some(ref _front) => {
+                value.borrow_mut().next = Some(_front.clone());
+                _front.borrow_mut().prev = Some(Arc::downgrade(&value));
+            }
+        }
+        self.front = Some(value.clone());
+        Ok(value.clone())
+
+    }
+
     fn insert(&mut self, key: String, data: T) {
         let entry: Arc<RefCell<LruEntry<T>>>;
         match self.back {
@@ -54,13 +81,58 @@ impl<T> LruCache<T> {
         self.cache.insert(key, entry.clone());
     }
 
+    fn close_gap(&mut self, entry: Arc<RefCell<LruEntry<T>>>) {
+        match (*entry).borrow_mut().prev {
+            None => {
+                let mut new_front = None;
+                match self.front {
+                    None => {},
+                    Some(ref _front) => {
+                        match (**_front).borrow_mut().next {
+                            None => {},
+                            Some(ref _second) => {
+                                // the element after the remove one is not the first
+                                new_front = Some(_second.clone());
+                                (**_second).borrow_mut().prev = None;
+                            }
+                        }
+                    }
+                }
+                self.front = new_front;
+            },
+            Some(ref _prev) => {
+                match (*entry).borrow_mut().next {
+                    None => {
+                        match _prev.upgrade() {
+                            None => {/* broken */},
+                            Some(ref _prev_arc) => {
+                                (*_prev_arc).borrow_mut().next = None;
+                            }
+                        }
+                    },
+                    Some(ref _next) => {
+                        (*_next).borrow_mut().prev = Some(_prev.clone()); 
+                        match _prev.upgrade() {
+                            None => {/* broken */}
+                            Some(ref _prev_arc) => {
+                                (*_prev_arc).borrow_mut().next = Some(_next.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fn remove(&mut self, key: String) -> Result<Arc<RefCell<LruEntry<T>>>, Error> {
         match self.cache.remove(&key) {
             None => {
                 Err(Error::new(ErrorKind::Other, "Not found"))
             },
             Some(entry) => {
-                match (*entry).borrow_mut().prev {
+                self.close_gap(entry.clone());
+                Ok(entry)
+                /*match (*entry).borrow_mut().prev {
                     None => {
                         let mut new_front = None;
                         match self.front {
@@ -100,7 +172,7 @@ impl<T> LruCache<T> {
                         }
                     }
                 }
-                Ok(entry)
+                Ok(entry)*/
             }
         }
     }
